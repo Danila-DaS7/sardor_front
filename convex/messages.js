@@ -36,11 +36,20 @@ export const getConversation = query({
   },
   handler: async (ctx, args) => {
     await requireTelegramAdmin(ctx, args.authData);
-    return await ctx.db
+    const messages = await ctx.db
       .query("sardor_messages")
       .withIndex("by_telegram_id", (q) => q.eq("telegramId", args.telegramId))
       .order("asc")
       .collect();
+
+    return await Promise.all(
+      messages.map(async (msg) => {
+        if (msg.photoStorageId) {
+          return { ...msg, photoUrl: await ctx.storage.getUrl(msg.photoStorageId) };
+        }
+        return msg;
+      })
+    );
   },
 });
 

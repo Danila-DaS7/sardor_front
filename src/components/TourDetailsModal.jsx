@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useConvexAction } from "../hooks/useConvexAction.js";
+import { getTelegramWebApp, isTelegramWebApp, getTelegramAuthPayload } from "../lib/telegram.js";
 
 const formatPrice = (template, value) => {
   if (!value) return null;
@@ -135,9 +137,39 @@ export default function TourDetailsModal({ tour, managerContact, copy, onClose, 
   );
   const [activeIndex, setActiveIndex] = useState(0);
   const [hasImageError, setHasImageError] = useState(false);
+  const [isContacting, setIsContacting] = useState(false);
   const hasGallery = images.length > 1;
   const { description: parsedDescription, modules } = buildModules(tour.details);
   const description = tour.description || tour.subtitle || parsedDescription || (modules.length ? "" : copy.detailsFallback);
+
+  const contactManagerAction = useConvexAction("bot:contactManager");
+
+  const handleContactManager = async (e) => {
+    e.preventDefault();
+    if (isContacting) return;
+
+    if (isTelegramWebApp()) {
+      const authData = getTelegramAuthPayload();
+      if (!authData) {
+        window.open(managerUrl, "_blank");
+        return;
+      }
+
+      setIsContacting(true);
+      try {
+        await contactManagerAction.run({ authData });
+        const tg = getTelegramWebApp();
+        if (tg) tg.close();
+      } catch (err) {
+        console.error("Failed to contact manager via action", err);
+        window.open(managerUrl, "_blank");
+      } finally {
+        setIsContacting(false);
+      }
+    } else {
+      window.open(managerUrl, "_blank");
+    }
+  };
 
   useEffect(() => {
     setActiveIndex(0);
@@ -253,14 +285,14 @@ export default function TourDetailsModal({ tour, managerContact, copy, onClose, 
 
             {/* Actions */}
             <div className="flex flex-col sm:flex-row gap-3">
-              <a
-                className="flex-1 text-center bg-white text-pub-accent border border-pub-accent rounded-full px-5 py-3 text-sm font-semibold hover:bg-pub-accent hover:text-white transition-colors"
-                href={managerUrl}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                className={`flex-1 text-center bg-white text-pub-accent border border-pub-accent rounded-full px-5 py-3 text-sm font-semibold transition-colors ${isContacting ? "opacity-50 cursor-not-allowed" : "hover:bg-pub-accent hover:text-white"}`}
+                onClick={handleContactManager}
+                disabled={isContacting}
+                type="button"
               >
-                Связаться с менеджером
-              </a>
+                {isContacting ? "Открываем..." : "Связаться с менеджером"}
+              </button>
               <button
                 className="flex-1 bg-pub-accent text-white rounded-full px-5 py-3 text-sm font-semibold hover:bg-pub-accent-dark transition-colors"
                 type="button"

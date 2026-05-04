@@ -48,6 +48,7 @@ export default defineSchema({
       mapEmbedUrl: v.string()
     }),
     telegramBotToken: v.optional(v.string()),
+    telegramBotUsername: v.optional(v.string()),
     welcomeMessage: v.optional(v.string())
   }),
   sardor_messages: defineTable({
@@ -55,6 +56,7 @@ export default defineSchema({
     direction: v.union(v.literal("incoming"), v.literal("outgoing")),
     text: v.optional(v.string()),
     photoFileId: v.optional(v.string()),
+    photoStorageId: v.optional(v.id("_storage")),
     telegramMessageId: v.optional(v.number()),
     senderName: v.optional(v.string()),
     sentByAdminId: v.optional(v.number()),
@@ -121,12 +123,18 @@ export default defineSchema({
     )),
     awaitingPermission: v.optional(v.boolean()),
     permissionGrantedAt: v.optional(v.number()),
+    assignedAdminId: v.optional(v.number()),
+    assignedAdminName: v.optional(v.string()),
+    assignedAt: v.optional(v.number()),
+    statusChangedAt: v.optional(v.number()),
+    statusChangedByAdminId: v.optional(v.number()),
+    statusChangedByName: v.optional(v.string()),
   })
     .index("by_telegram_id", ["telegramId"]),
   sardor_referrals: defineTable({
     code: v.string(),
     managerName: v.string(),
-    managerTelegramUrl: v.string(),
+    managerTelegramUrl: v.optional(v.string()),
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),

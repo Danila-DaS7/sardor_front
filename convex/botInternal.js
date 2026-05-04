@@ -1,6 +1,8 @@
-import { internalMutationGeneric, internalQueryGeneric } from "convex/server";
+import { internalActionGeneric, internalMutationGeneric, internalQueryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api.js";
 
+const internalAction = internalActionGeneric;
 const internalMutation = internalMutationGeneric;
 const internalQuery = internalQueryGeneric;
 
@@ -86,7 +88,81 @@ export const insertMessage = internalMutation({
       await ctx.db.insert("sardor_conversations", convPayload);
     }
 
+    if (args.photoFileId) {
+      await ctx.scheduler.runAfter(0, internal.botInternal.downloadAndStorePhoto, {
+        messageId: msgId,
+        photoFileId: args.photoFileId,
+      });
+    }
+
     return msgId;
+  },
+});
+
+/* ── Store downloaded photo ── */
+export const updateMessagePhotoStorageId = internalMutation({
+  args: {
+    messageId: v.id("sardor_messages"),
+    photoStorageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.messageId, { photoStorageId: args.photoStorageId });
+  },
+});
+
+export const generatePhotoUploadUrl = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/* ── Download photo from Telegram to Convex Storage ── */
+export const downloadAndStorePhoto = internalAction({
+  args: {
+    messageId: v.id("sardor_messages"),
+    photoFileId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const token = await ctx.runQuery(internal.botInternal.getBotToken);
+    if (!token) return;
+
+    try {
+      const fileRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${args.photoFileId}`);
+      const fileData = await fileRes.json();
+      if (!fileData.ok) {
+        console.error("Failed to get file from Telegram:", fileData);
+        return;
+      }
+
+      const downloadUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
+      const imgRes = await fetch(downloadUrl);
+      if (!imgRes.ok) {
+        console.error("Failed to download image:", imgRes.statusText);
+        return;
+      }
+
+      const uploadUrl = await ctx.runMutation(internal.botInternal.generatePhotoUploadUrl);
+      const uploadRes = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": imgRes.headers.get("content-type") || "image/jpeg" },
+        body: await imgRes.blob(),
+      });
+      
+      if (!uploadRes.ok) {
+        console.error("Failed to upload image to Convex storage:", uploadRes.statusText);
+        return;
+      }
+
+      const { storageId } = await uploadRes.json();
+
+      await ctx.runMutation(internal.botInternal.updateMessagePhotoStorageId, {
+        messageId: args.messageId,
+        photoStorageId: storageId,
+      });
+    } catch (e) {
+      console.error("Error downloading photo:", e);
+    }
   },
 });
 

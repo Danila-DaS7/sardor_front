@@ -67,7 +67,7 @@ http.route({
       });
 
       // Store incoming message
-      await ctx.runMutation(internal.botInternal.insertMessage, {
+      const messageId = await ctx.runMutation(internal.botInternal.insertMessage, {
         telegramId,
         direction: "incoming",
         text: text || caption || undefined,
@@ -76,6 +76,10 @@ http.route({
         senderName,
         status: "sent",
       });
+
+      if (photoFileId) {
+        // Run in background via scheduler is the correct way, but we will schedule it from insertMessage directly.
+      }
 
       // Notify admins about new message
       await ctx.runAction(internal.bot.notifyAdminsNewMessage, {

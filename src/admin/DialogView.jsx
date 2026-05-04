@@ -442,9 +442,23 @@ export default function DialogView() {
                       : "none",
                   }}
                 >
-                  <p style={{ fontSize: 15, lineHeight: 1.4, wordBreak: "break-word" }}>
-                    {msg.text || "[фото]"}
-                  </p>
+                  {msg.photoUrl && (
+                    <img
+                      src={msg.photoUrl}
+                      alt="Фото от клиента"
+                      style={{ maxWidth: "100%", borderRadius: 8, marginBottom: msg.text ? 8 : 0 }}
+                    />
+                  )}
+                  {msg.text && (
+                    <p style={{ fontSize: 15, lineHeight: 1.4, wordBreak: "break-word" }}>
+                      {msg.text}
+                    </p>
+                  )}
+                  {!msg.text && !msg.photoUrl && (
+                    <p style={{ fontSize: 15, lineHeight: 1.4, wordBreak: "break-word" }}>
+                      [фото]
+                    </p>
+                  )}
                   <p
                     style={{
                       fontSize: 11,

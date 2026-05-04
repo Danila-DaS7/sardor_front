@@ -7,6 +7,7 @@ import {
   setWebhook,
   deleteWebhook,
 } from "./telegramBot.js";
+import { verifyTelegramInitData } from "./telegramAuth.js";
 
 const action = actionGeneric;
 const internalAction = internalActionGeneric;
@@ -68,23 +69,15 @@ export const sendWelcome = internalAction({
 
     // Handle "contact" deep link — client came via "Связаться с менеджером" button
     if (args.startParam === "contact") {
+      let welcomeText = await ctx.runQuery(internal.botInternal.getWelcomeMessage);
+      if (welcomeText) {
+        welcomeText = welcomeText.replace(/\{FirstName\}/gi, args.firstName || "клиент");
+      } else {
+        welcomeText = args.firstName ? `Привет, ${args.firstName}! Добро пожаловать.` : "Привет! Добро пожаловать.";
+      }
+
       try {
-        await sendMessage(token, args.telegramId, [
-          "\u{1f44b} <b>Здравствуйте!</b>",
-          "",
-          "Вы связались с нами через кнопку на сайте.",
-          "Менеджер скоро ответит вам здесь, в этом чате.",
-          "",
-          "Если хотите оставить заявку на тур, используйте кнопку ниже:",
-        ].join("\n"), {
-          reply_markup: {
-            keyboard: [
-              [{ text: "\u{1f4cb} Оставить заявку", web_app: { url: process.env.MINIAPP_URL || "" } }],
-              [{ text: "\u2753 Задать вопрос менеджеру" }],
-            ],
-            resize_keyboard: true,
-          },
-        });
+        await sendMessage(token, args.telegramId, welcomeText, { parseMode: undefined });
       } catch (e) {
         console.error("Failed to send contact welcome:", e.message);
       }
@@ -99,9 +92,23 @@ export const sendWelcome = internalAction({
       for (const adminId of adminIds) {
         if (adminId === args.telegramId) continue;
         try {
-          await sendMessage(token, adminId, contactText);
+          await sendMessage(token, adminId, contactText, {
+            reply_markup: {
+              inline_keyboard: [[{ text: "Открыть админ панель", url: "https://t.me/SardorTravelBot/admin" }]]
+            }
+          });
         } catch { /* skip */ }
       }
+
+      // Store in database so it appears in Admin Panel Dialogs
+      await ctx.runMutation(internal.botInternal.insertMessage, {
+        telegramId: args.telegramId,
+        direction: "incoming",
+        text: "Новое обращение через кнопку \"Связаться\"!",
+        senderName: args.firstName || "Неизвестно",
+        status: "sent",
+      });
+
       return;
     }
 
@@ -156,11 +163,14 @@ export const sendWelcome = internalAction({
 
     // Default welcome message
     let text = await ctx.runQuery(internal.botInternal.getWelcomeMessage);
-    if (!text) {
+    if (text) {
+      text = text.replace(/\{FirstName\}/gi, args.firstName || "клиент");
+    } else {
       text = args.firstName
         ? `Привет, ${args.firstName}! Добро пожаловать.`
         : "Привет! Добро пожаловать.";
     }
+
     try {
       await sendMessage(token, args.telegramId, text, { parseMode: undefined });
     } catch (e) {
@@ -208,7 +218,11 @@ export const notifyNewRequest = internalAction({
 
     for (const adminId of adminIds) {
       try {
-        await sendMessage(token, adminId, adminText);
+        await sendMessage(token, adminId, adminText, {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Открыть админ панель", url: "https://t.me/SardorTravelBot/admin" }]]
+          }
+        });
       } catch {
         // Admin may have blocked the bot — skip
       }
@@ -260,7 +274,11 @@ export const notifyAdminsNewMessage = internalAction({
       // Don't notify the sender if they happen to be an admin
       if (adminId === args.telegramId) continue;
       try {
-        await sendMessage(token, adminId, text);
+        await sendMessage(token, adminId, text, {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Открыть админ панель", url: "https://t.me/SardorTravelBot/admin" }]]
+          }
+        });
       } catch {
         // skip
       }
@@ -317,6 +335,22 @@ export const sendReply = action({
   },
 });
 
+/* ── Frontend Action: Contact Manager ── */
+export const contactManager = action({
+  args: { authData: v.string() },
+  handler: async (ctx, args) => {
+    const { user } = await verifyTelegramInitData(ctx, args.authData);
+    if (!user || !user.id) {
+      throw new Error("Unauthorized");
+    }
+    const senderName = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || "User";
+    await ctx.runAction(internal.bot.handleManagerCommand, {
+      telegramId: Number(user.id),
+      senderName,
+    });
+  }
+});
+
 /* ── Handle /manager command — notify admins about contact request ── */
 export const handleManagerCommand = internalAction({
   args: {
@@ -327,11 +361,15 @@ export const handleManagerCommand = internalAction({
     const token = await ctx.runQuery(internal.botInternal.getBotToken);
     if (!token) return;
 
+    let textToSend = await ctx.runQuery(internal.botInternal.getWelcomeMessage);
+    if (textToSend) {
+      textToSend = textToSend.replace(/\{FirstName\}/gi, args.senderName || "клиент");
+    } else {
+      textToSend = "Напишите ваш вопрос, и менеджер ответит вам в ближайшее время.";
+    }
+
     try {
-      await sendMessage(token, args.telegramId,
-        "Напишите ваш вопрос, и менеджер ответит вам в ближайшее время.",
-        { parseMode: undefined }
-      );
+      await sendMessage(token, args.telegramId, textToSend, { parseMode: undefined });
     } catch (e) {
       console.error("Failed to send manager prompt:", e.message);
     }
@@ -342,9 +380,22 @@ export const handleManagerCommand = internalAction({
     for (const adminId of adminIds) {
       if (adminId === args.telegramId) continue;
       try {
-        await sendMessage(token, adminId, text);
+        await sendMessage(token, adminId, text, {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Открыть админ панель", url: "https://t.me/SardorTravelBot/admin" }]]
+          }
+        });
       } catch { /* skip */ }
     }
+
+    // Store in database so it appears in Admin Panel Dialogs
+    await ctx.runMutation(internal.botInternal.insertMessage, {
+      telegramId: args.telegramId,
+      direction: "incoming",
+      text: "Клиент хочет связаться с менеджером",
+      senderName: args.senderName,
+      status: "sent",
+    });
   },
 });
 
